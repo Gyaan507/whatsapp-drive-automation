@@ -1,0 +1,190 @@
+{
+  "name": "WhatsApp File Commands Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "whatsapp-command",
+        "options": {}
+      },
+      "id": "1",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "webhookMethods": { "POST": true }
+    },
+    {
+      "parameters": {
+        "functionCode": "const text = $json.body?.message?.trim() || '';\nconst [command, ...args] = text.split(/\\s+/);\nreturn [{ command: command.toLowerCase(), args }];"
+      },
+      "id": "2",
+      "name": "Parse Command",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "propertyName": "command",
+        "rules": [
+          { "value": "list", "type": "equal" },
+          { "value": "move", "type": "equal" },
+          { "value": "delete", "type": "equal" },
+          { "value": "summary", "type": "equal" }
+        ]
+      },
+      "id": "3",
+      "name": "Switch Command",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 1,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "operation": "list",
+        "filters": { "folderId": "YOUR_SOURCE_FOLDER_ID" }
+      },
+      "id": "4",
+      "name": "Google Drive - List Files",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 1,
+      "position": [1000, 150],
+      "credentials": { "googleDriveOAuth2Api": "YOUR_GOOGLE_DRIVE_CREDENTIALS" }
+    },
+    {
+      "parameters": {
+        "operation": "move",
+        "fileId": "={{$json.args[0]}}",
+        "parentId": "YOUR_TARGET_FOLDER_ID"
+      },
+      "id": "5",
+      "name": "Google Drive - Move File",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 1,
+      "position": [1000, 250],
+      "credentials": { "googleDriveOAuth2Api": "YOUR_GOOGLE_DRIVE_CREDENTIALS" }
+    },
+    {
+      "parameters": {
+        "operation": "delete",
+        "fileId": "={{$json.args[0]}}"
+      },
+      "id": "6",
+      "name": "Google Drive - Delete File",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 1,
+      "position": [1000, 350],
+      "credentials": { "googleDriveOAuth2Api": "YOUR_GOOGLE_DRIVE_CREDENTIALS" }
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": "={{$json.args[0]}}"
+      },
+      "id": "7",
+      "name": "Google Drive - Download File",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 1,
+      "position": [1000, 450],
+      "credentials": { "googleDriveOAuth2Api": "YOUR_GOOGLE_DRIVE_CREDENTIALS" }
+    },
+    {
+      "parameters": {
+        "functionCode": "const pdf = require('pdf-parse');\nreturn pdf($binary.data).then(data => {\n  return [{ text: data.text }];\n});"
+      },
+      "id": "8",
+      "name": "Extract PDF Text",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1250, 450]
+    },
+    {
+      "parameters": {
+        "url": "https://api.groq.com/v1/chat/completions",
+        "method": "POST",
+        "authentication": "headerAuth",
+        "sendBody": true,
+        "jsonParameters": true,
+        "options": {},
+        "body": {
+          "model": "mixtral-8x7b-32768",
+          "messages": [
+            { "role": "system", "content": "You are a summarizer." },
+            { "role": "user", "content": "={{$json[\"text\"]}}" }
+          ]
+        }
+      },
+      "id": "9",
+      "name": "Groq API - Summarize",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [1500, 450],
+      "credentials": { "httpHeaderAuth": "YOUR_GROQ_API_KEY" }
+    },
+    {
+      "parameters": {
+        "functionCode": "return [{ reply: JSON.stringify($json, null, 2) }];"
+      },
+      "id": "10",
+      "name": "Format Reply",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1750, 300]
+    },
+    {
+      "parameters": {
+        "url": "YOUR_WHATSAPP_API_URL",
+        "method": "POST",
+        "sendBody": true,
+        "jsonParameters": true,
+        "body": {
+          "to": "={{$json.body?.from}}",
+          "message": "={{$json.reply}}"
+        }
+      },
+      "id": "11",
+      "name": "Send WhatsApp Reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [2000, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "sheetId": "YOUR_SHEET_ID",
+        "range": "Sheet1!A:C",
+        "options": {},
+        "valueInputMode": "RAW",
+        "data": [
+          ["={{$json.body?.from}}", "={{$json.command}}", "={{$json.reply}}"]
+        ]
+      },
+      "id": "12",
+      "name": "Log to Google Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 1,
+      "position": [2250, 300],
+      "credentials": { "googleSheetsOAuth2Api": "YOUR_GOOGLE_SHEETS_CREDENTIALS" }
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": { "main": [[{ "node": "Parse Command", "type": "main", "index": 0 }]] },
+    "Parse Command": { "main": [[{ "node": "Switch Command", "type": "main", "index": 0 }]] },
+    "Switch Command": {
+      "main": [
+        [{ "node": "Google Drive - List Files", "type": "main", "index": 0 }],
+        [{ "node": "Google Drive - Move File", "type": "main", "index": 0 }],
+        [{ "node": "Google Drive - Delete File", "type": "main", "index": 0 }],
+        [{ "node": "Google Drive - Download File", "type": "main", "index": 0 }]
+      ]
+    },
+    "Google Drive - Download File": { "main": [[{ "node": "Extract PDF Text", "type": "main", "index": 0 }]] },
+    "Extract PDF Text": { "main": [[{ "node": "Groq API - Summarize", "type": "main", "index": 0 }]] },
+    "Google Drive - List Files": { "main": [[{ "node": "Format Reply", "type": "main", "index": 0 }]] },
+    "Google Drive - Move File": { "main": [[{ "node": "Format Reply", "type": "main", "index": 0 }]] },
+    "Google Drive - Delete File": { "main": [[{ "node": "Format Reply", "type": "main", "index": 0 }]] },
+    "Groq API - Summarize": { "main": [[{ "node": "Format Reply", "type": "main", "index": 0 }]] },
+    "Format Reply": { "main": [[{ "node": "Send WhatsApp Reply", "type": "main", "index": 0 }]] },
+    "Send WhatsApp Reply": { "main": [[{ "node": "Log to Google Sheet", "type": "main", "index": 0 }]] }
+  }
+}
